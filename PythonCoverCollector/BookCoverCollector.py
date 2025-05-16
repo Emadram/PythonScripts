@@ -154,11 +154,21 @@ class BookManagerApp:
         self.description_text_widget = None # Will be tk.Text
         self.ol_subjects_var = tk.StringVar()
 
+        self.isbn_input_var = tk.StringVar()
+
 
     def _setup_ui(self):
         # Main frame
         main_frame = ttk.Frame(self.master, padding="10")
         main_frame.pack(fill=tk.BOTH, expand=True)
+
+        # --- ISBN Input Section ---
+        isbn_frame = ttk.LabelFrame(main_frame, text="Fetch Books by ISBN", padding="10")
+        isbn_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(isbn_frame, text="Enter ISBNs (comma or newline separated):").pack(anchor=tk.W)
+        self.isbn_text = tk.Text(isbn_frame, height=3, width=60)
+        self.isbn_text.pack(side=tk.LEFT, padx=5)
+        ttk.Button(isbn_frame, text="Fetch Books", command=self.fetch_books_by_isbn).pack(side=tk.LEFT, padx=10)
 
         # Layout: Left (Cover + OL Info), Right (User Input Fields)
         left_pane = ttk.Frame(main_frame, width=350)
