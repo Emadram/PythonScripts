@@ -54,13 +54,14 @@ def fetch_random_books(n):
     with requests.Session() as session: # Use a session for potential keep-alive benefits
         while len(books_data) < n and tries < max_tries:
             tries += 1
-            page = random.randint(1, 500) # Reduced page range for potentially more relevant results
+            page = random.randint(1, 500) 
             try:
-                search_url = f"https://openlibrary.org/search.json?q=language:eng&subject_facet=Fiction&subject_facet=Non-fiction&sort=random&limit=20&page={page}"
+                # Increased limit to 50 to fetch more candidates per API call
+                search_url = f"https://openlibrary.org/search.json?q=language:eng&subject_facet=Fiction&subject_facet=Non-fiction&sort=random&limit=50&page={page}"
                 res = session.get(search_url, timeout=15)
                 
                 if res.status_code != 200:
-                    print(f"API request failed with status {res.status_code}, retrying...", end="\\r")
+                    print(f"API request failed with status {res.status_code}, retrying... (Attempt {tries}/{max_tries})", end="\\\\r")
                     time.sleep(0.5)
                     continue
                 
