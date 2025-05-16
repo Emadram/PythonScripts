@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyz
+*.whl
+*.egg-info/
+*.egg
+
+# Virtual Environments
+.env/
+.venv/
+env/
+venv/
+ENV/
+VENV/
+
+# IDE / Editor specific
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# macOS
+.DS_Store
+
+# Project Specific / Generated files
+PythonCoverCollector/book_covers/
+downloaded_book_covers/
+
+# If you have other build artifacts or local config files, add them below
+# e.g. build/, dist/, *.local
