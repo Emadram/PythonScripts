@@ -1,5 +1,2 @@
-<<<<<<< HEAD
 # PythonScripts
-=======
-# PythonScripts
->>>>>>> main
+>>>>>>> dev
