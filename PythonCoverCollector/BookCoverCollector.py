@@ -87,32 +87,28 @@ def fetch_random_books(n):
                             "authors": doc.get("author_name", ["Unknown Author"]),
                             "openlibrary_key": book_key,
                             "subjects_from_ol": doc.get("subject", []),
-                            "isbn": doc.get("isbn", []) # Fetch ISBNs
+                            "isbn": doc.get("isbn", []),
+                            "description": "Description not loaded yet. Will load on demand.", # Placeholder
+                            "description_loaded": False # Flag to indicate if full description has been fetched
                         }
                         
-                        # Fetch more details (like description)
-                        details, error_msg = fetch_book_details(book_key)
-                        if details:
-                            book_info.update(details)
-                        else:
-                            book_info["description"] = "Description not found or error fetching."
-                            # print(f"Could not fetch details for {book_info['title']}: {error_msg}")
+                        # Removed fetch_book_details from here to speed up initial loading
 
                         books_data.append(book_info)
-                        print(f"Found {len(books_data)}/{n} books... (Attempt {tries})", end="\\r")
+                        print(f"Found {len(books_data)}/{n} books... (Attempt {tries}/{max_tries})", end="\\\\r")
 
-                time.sleep(0.2) # Politeness delay
+                time.sleep(0.2) 
             except requests.exceptions.Timeout:
-                print(f"Request timed out on attempt {tries}, retrying...", end="\\r")
+                print(f"Request timed out on attempt {tries}/{max_tries}, retrying...", end="\\\\r")
                 time.sleep(1)
             except requests.RequestException as e:
-                print(f"Request failed on attempt {tries}: {e}, retrying...", end="\\r")
+                print(f"Request failed on attempt {tries}/{max_tries}: {e}, retrying...", end="\\\\r")
                 time.sleep(0.5)
             except json.JSONDecodeError:
-                print(f"JSON decode error on attempt {tries}, skipping page...", end="\\r")
+                print(f"JSON decode error on attempt {tries}/{max_tries}, skipping page...", end="\\\\r")
                 time.sleep(0.5)
 
-    print(f"\\nFinished fetching. Found {len(books_data)} books after {tries} tries.")
+    print(f"\\\\nFinished fetching. Found {len(books_data)} books after {tries} tries.")
     if not books_data and tries >= max_tries:
         print("Could not fetch any books after maximum tries.")
     return books_data
