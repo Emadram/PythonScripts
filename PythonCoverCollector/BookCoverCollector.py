@@ -116,25 +116,19 @@ def fetch_random_books(n):
 # --- Tkinter GUI Application ---
 
 class BookManagerApp:
-    def __init__(self, master, books_data_list):
+    def __init__(self, master, books_data_list=None):
         self.master = master
         master.title("Book Data Manager")
-        master.geometry("1000x750")
+        master.geometry("1000x800")
 
-        self.books_data_list = books_data_list
+        self.books_data_list = books_data_list or []
         self.current_book_index = 0
-        
-        # Store user inputs for each book if needed, for now, we focus on current book export
-        self.current_form_data = {} 
-
-        if not self.books_data_list:
-            messagebox.showinfo("No Books", "No books were fetched to display.")
-            master.destroy()
-            return
+        self.current_form_data = {}
 
         self._init_vars()
         self._setup_ui()
-        self.load_book_data(self.current_book_index)
+        if self.books_data_list:
+            self.load_book_data(self.current_book_index)
 
     def _init_vars(self):
         """Initialize Tkinter variables for form fields."""
