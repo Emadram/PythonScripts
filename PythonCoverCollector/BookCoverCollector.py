@@ -74,12 +74,11 @@ def fetch_random_books(n):
 
                     book_key = doc.get("key")
                     if not book_key or book_key in processed_keys:
-                        continue # Skip if no key or already processed
+                        continue 
 
                     if "cover_i" in doc and "title" in doc:
                         processed_keys.add(book_key)
                         
-                        # Basic info from search
                         book_info = {
                             "title": doc.get("title", "Unknown Title"),
                             "cover_id": doc["cover_i"],
