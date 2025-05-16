@@ -37,7 +37,15 @@ def fetch_book_details(book_key):
 def fetch_random_books(n):
     books_data = []
     tries = 0
-    max_tries = n * 10 # Adjust max_tries based on how many books are requested
+    # Optimized max_tries: (n // 5 usable books per API call on average) + 20 buffer
+    # Assuming limit=50 and roughly 10% to 20% usable results per page (i.e., 5-10 books)
+    # This means for n books, we might need n/5 to n/10 API calls.
+    # max_tries gives a ceiling.
+    max_tries = (n // 5) + 20  # More reasonable max_tries
+    if n == 1: # Ensure at least a few tries for a single book if n is very small
+        max_tries = max(max_tries, 10)
+
+
     print("Fetching book data from OpenLibrary...")
     
     # Use a set to avoid duplicate book processing if keys are repeated in search results
