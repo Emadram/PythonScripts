@@ -23,8 +23,9 @@ VENV/
 *.sublime-workspace
 
 # macOS
-.DS_Store
 PythonCoverCollector/.DS_Store
+.DS_Store
+*/.DS_Store
 # Project Specific / Generated files
 PythonCoverCollector/book_covers/
 downloaded_book_covers/

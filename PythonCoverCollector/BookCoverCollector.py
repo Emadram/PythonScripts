@@ -1,12 +1,11 @@
 import requests
 import os
-import random
-import time
-import tkinter as tk
-from tkinter import ttk, messagebox
-from PIL import Image, ImageTk
-import io
 import json
+import io
+import traceback
+from tkinter import ttk, messagebox
+import tkinter as tk
+from PIL import Image, ImageTk
 
 # --- Data Fetching from OpenLibrary ---
 
@@ -34,84 +33,111 @@ def fetch_book_details(book_key):
     except requests.RequestException as e:
         return None, f"Request exception for details: {e}"
 
-def fetch_random_books(n):
-    books_data = []
-    tries = 0
-    # Optimized max_tries: (n // 5 usable books per API call on average) + 20 buffer
-    # Assuming limit=50 and roughly 10% to 20% usable results per page (i.e., 5-10 books)
-    # This means for n books, we might need n/5 to n/10 API calls.
-    # max_tries gives a ceiling.
-    max_tries = (n // 5) + 20  # More reasonable max_tries
-    if n == 1: # Ensure at least a few tries for a single book if n is very small
-        max_tries = max(max_tries, 10)
-
-
-    print("Fetching book data from OpenLibrary...")
+def fetch_books_by_isbns(isbn_list):
+    """
+    Fetch book metadata and covers for a list of ISBNs using OpenLibrary's /search.json?isbn=... endpoint.
+    Returns a list of book dicts (one per found ISBN).
+    """
+    if not isbn_list:
+        return []
+    # Remove duplicates and empty
+    isbn_list = [isbn.strip() for isbn in isbn_list if isbn.strip()]
+    if not isbn_list:
+        return []
     
-    # Use a set to avoid duplicate book processing if keys are repeated in search results
-    processed_keys = set()
+    books = []
+    batch_size = 50 # OpenLibrary can handle many ISBNs in one query
+    for i in range(0, len(isbn_list), batch_size):
+        batch = isbn_list[i:i+batch_size]
+        # Construct URL for batch ISBN query
+        params = '&'.join(f'isbn={isbn}' for isbn in batch)
+        url = f'https://openlibrary.org/search.json?{params}'
+        print(f"Fetching batch: {url}") # DEBUG
+        try:
+            res = requests.get(url, timeout=20) # Increased timeout slightly
+            print(f"Response status code: {res.status_code}") # DEBUG
+            if res.status_code != 200:
+                print(f"API Error for batch. Status: {res.status_code}, Response: {res.text[:200]}...") # DEBUG
+                continue
+            
+            response_data = res.json()
+            docs = response_data.get('docs', [])
+            print(f"Found {len(docs)} docs in response for batch. numFound: {response_data.get('numFound')}, Batch size: {len(batch)}") # DEBUG
 
-    with requests.Session() as session: # Use a session for potential keep-alive benefits
-        while len(books_data) < n and tries < max_tries:
-            tries += 1
-            page = random.randint(1, 500) 
-            try:
-                # Increased limit to 50 to fetch more candidates per API call
-                search_url = f"https://openlibrary.org/search.json?q=language:eng&subject_facet=Fiction&subject_facet=Non-fiction&sort=random&limit=50&page={page}"
-                res = session.get(search_url, timeout=15)
+            if len(batch) == 1 and len(docs) == 1:
+                doc = docs[0]
+                queried_isbn_for_single_match = batch[0] # The ISBN we asked for
+                print(f"Single batch item and single doc returned. Assuming doc (title: '{doc.get('title', 'N/A')}') is for ISBN {queried_isbn_for_single_match}.") # DEBUG
                 
-                if res.status_code != 200:
-                    print(f"API request failed with status {res.status_code}, retrying... (Attempt {tries}/{max_tries})", end="\\\\r")
-                    time.sleep(0.5)
-                    continue
-                
-                docs = res.json().get("docs", [])
-                random.shuffle(docs)
-                
+                # Use the queried_isbn_for_single_match as the definitive ISBN for this book record
+                book = {
+                    'title': doc.get('title', 'Unknown Title'),
+                    'authors': doc.get('author_name', ['Unknown Author']),
+                    'cover_url_medium': f'https://covers.openlibrary.org/b/isbn/{queried_isbn_for_single_match}-M.jpg',
+                    'cover_url_large': f'https://covers.openlibrary.org/b/isbn/{queried_isbn_for_single_match}-L.jpg',
+                    'subjects_from_ol': doc.get('subject', []),
+                    'isbn': [queried_isbn_for_single_match], # Store the matched ISBN
+                    'openlibrary_key': doc.get('key'),
+                    'description': doc.get('first_sentence_value', doc.get('first_sentence', [f"Published: {doc.get('first_publish_year', 'N/A')}"])[0]) if doc.get('first_sentence_value') or doc.get('first_sentence') or doc.get('first_publish_year') else 'Description not available.',
+                    'description_loaded': True
+                }
+                books.append(book)
+            else:
+                # Original logic for multi-item batches or when doc count doesn't match single batch item
+                # This part still relies on finding ISBN in doc.seed or doc.isbn
                 for doc in docs:
-                    if len(books_data) >= n:
-                        break
+                    found_isbn_in_doc = None 
+                    seeds = doc.get('seed', [])
+                    for seed_item in seeds:
+                        if isinstance(seed_item, str) and '/isbn/' in seed_item:
+                            potential_isbn = seed_item.split('/isbn/')[-1]
+                            if potential_isbn in batch:
+                                found_isbn_in_doc = potential_isbn
+                                print(f"Found ISBN {found_isbn_in_doc} from seed: {seed_item} for doc title: '{doc.get('title', 'N/A')}'") # DEBUG
+                                break
+                    
+                    if not found_isbn_in_doc:
+                        doc_isbns = doc.get('isbn', [])
+                        if isinstance(doc_isbns, list):
+                            for potential_isbn in doc_isbns:
+                                if potential_isbn in batch:
+                                    found_isbn_in_doc = potential_isbn
+                                    print(f"Found ISBN {found_isbn_in_doc} from doc.isbn field for doc title: '{doc.get('title', 'N/A')}'") # DEBUG
+                                    break
+                                    
+                    if not found_isbn_in_doc:
+                        print(f"Skipping doc (title: '{doc.get('title', 'N/A')}'), no matching ISBN found via seed or doc.isbn that is in the current batch. Seeds: {seeds}, Doc ISBNs: {doc.get('isbn', [])}, Batch: {batch}") # DEBUG
+                        continue
 
-                    book_key = doc.get("key")
-                    if not book_key or book_key in processed_keys:
-                        continue 
-
-                    if "cover_i" in doc and "title" in doc:
-                        processed_keys.add(book_key)
-                        
-                        book_info = {
-                            "title": doc.get("title", "Unknown Title"),
-                            "cover_id": doc["cover_i"],
-                            "cover_url_large": f"https://covers.openlibrary.org/b/id/{doc['cover_i']}-L.jpg",
-                            "cover_url_medium": f"https://covers.openlibrary.org/b/id/{doc['cover_i']}-M.jpg",
-                            "authors": doc.get("author_name", ["Unknown Author"]),
-                            "openlibrary_key": book_key,
-                            "subjects_from_ol": doc.get("subject", []),
-                            "isbn": doc.get("isbn", []),
-                            "description": "Description not loaded yet. Will load on demand.", # Placeholder
-                            "description_loaded": False # Flag to indicate if full description has been fetched
-                        }
-                        
-                        # Removed fetch_book_details from here to speed up initial loading
-
-                        books_data.append(book_info)
-                        print(f"Found {len(books_data)}/{n} books... (Attempt {tries}/{max_tries})", end="\\\\r")
-
-                time.sleep(0.2) 
-            except requests.exceptions.Timeout:
-                print(f"Request timed out on attempt {tries}/{max_tries}, retrying...", end="\\\\r")
-                time.sleep(1)
-            except requests.RequestException as e:
-                print(f"Request failed on attempt {tries}/{max_tries}: {e}, retrying...", end="\\\\r")
-                time.sleep(0.5)
-            except json.JSONDecodeError:
-                print(f"JSON decode error on attempt {tries}/{max_tries}, skipping page...", end="\\\\r")
-                time.sleep(0.5)
-
-    print(f"\\\\nFinished fetching. Found {len(books_data)} books after {tries} tries.")
-    if not books_data and tries >= max_tries:
-        print("Could not fetch any books after maximum tries.")
-    return books_data
+                    # Construct book dict using found_isbn_in_doc
+                    book = {
+                        'title': doc.get('title', 'Unknown Title'),
+                        'authors': doc.get('author_name', ['Unknown Author']),
+                        'cover_url_medium': f'https://covers.openlibrary.org/b/isbn/{found_isbn_in_doc}-M.jpg',
+                        'cover_url_large': f'https://covers.openlibrary.org/b/isbn/{found_isbn_in_doc}-L.jpg',
+                        'subjects_from_ol': doc.get('subject', []),
+                        'isbn': [found_isbn_in_doc], 
+                        'openlibrary_key': doc.get('key'),
+                        'description': doc.get('first_sentence_value', doc.get('first_sentence', [f"Published: {doc.get('first_publish_year', 'N/A')}"])[0]) if doc.get('first_sentence_value') or doc.get('first_sentence') or doc.get('first_publish_year') else 'Description not available.',
+                        'description_loaded': True
+                    }
+                    books.append(book)
+        except requests.exceptions.Timeout as e:
+            print(f"RequestTimeout for URL {url}: {e}") # DEBUG
+            continue
+        except requests.exceptions.RequestException as e:
+            print(f"RequestException for URL {url}: {e}") # DEBUG
+            continue
+        except json.JSONDecodeError as e:
+            print(f"JSONDecodeError for URL {url}: {e}. Response text: {res.text[:200]}...") # DEBUG
+            continue
+        except Exception as e:
+            print(f"Unexpected error processing batch for URL {url}: {e}") # DEBUG
+            traceback.print_exc() # Print full traceback
+            continue
+    
+    print(f"Finished fetching by ISBNs. Total books collected: {len(books)}") # DEBUG
+    return books
 
 # --- Tkinter GUI Application ---
 
@@ -121,14 +147,20 @@ class BookManagerApp:
         master.title("Book Data Manager")
         master.geometry("1000x800")
 
-        self.books_data_list = books_data_list or []
-        self.current_book_index = 0
+        # Initialize with an empty list, as books will be fetched via ISBN through UI
+        self.books_data_list = [] 
+        self.current_book_index = -1 # No book loaded initially
         self.current_form_data = {}
 
         self._init_vars()
         self._setup_ui()
-        if self.books_data_list:
-            self.load_book_data(self.current_book_index)
+        # Removed automatic loading of initial books_data_list
+        # self.load_book_data will be called after fetching via ISBN
+        if not self.books_data_list:
+            self.nav_label.config(text="No books loaded. Use 'Fetch Books by ISBN'.")
+            # Optionally, disable Next/Prev buttons if no books
+            self.prev_button.config(state=tk.DISABLED)
+            self.next_button.config(state=tk.DISABLED)
 
     def _init_vars(self):
         """Initialize Tkinter variables for form fields."""
@@ -277,15 +309,21 @@ class BookManagerApp:
         controls_frame = ttk.Frame(self.master, padding="10")
         controls_frame.pack(fill=tk.X, side=tk.BOTTOM)
 
-        ttk.Button(controls_frame, text="Previous", command=self.prev_book).pack(side=tk.LEFT, padx=5)
-        ttk.Button(controls_frame, text="Next", command=self.next_book).pack(side=tk.LEFT, padx=5)
+        self.prev_button = ttk.Button(controls_frame, text="Previous", command=self.prev_book)
+        self.prev_button.pack(side=tk.LEFT, padx=5)
+        self.next_button = ttk.Button(controls_frame, text="Next", command=self.next_book)
+        self.next_button.pack(side=tk.LEFT, padx=5)
         self.nav_label = ttk.Label(controls_frame, text="")
         self.nav_label.pack(side=tk.LEFT, padx=10)
         ttk.Button(controls_frame, text="Export Data for Strapi (Console)", command=self.export_book_data).pack(side=tk.RIGHT, padx=5)
 
 
     def load_book_data(self, index):
-        if not (0 <= index < len(self.books_data_list)):
+        if not self.books_data_list or not (0 <= index < len(self.books_data_list)):
+            self.clear_form_and_display()
+            self.nav_label.config(text="No book to display or index out of bounds.")
+            self.prev_button.config(state=tk.DISABLED)
+            self.next_button.config(state=tk.DISABLED)
             return
 
         self.current_book_index = index
@@ -348,6 +386,8 @@ class BookManagerApp:
         self.cover_strapi_id_var.set("")
 
         self.nav_label.config(text=f"Book {index + 1} of {len(self.books_data_list)}")
+        self.prev_button.config(state=tk.NORMAL if index > 0 else tk.DISABLED)
+        self.next_button.config(state=tk.NORMAL if index < len(self.books_data_list) - 1 else tk.DISABLED)
 
 
     def display_cover(self, cover_url):
@@ -382,6 +422,9 @@ class BookManagerApp:
 
 
     def next_book(self):
+        if not self.books_data_list:
+            messagebox.showinfo("Navigation", "No books loaded. Fetch books by ISBN first.")
+            return
         if self.current_book_index < len(self.books_data_list) - 1:
             # Could save current form state here if needed for persistence between nav
             self.current_book_index += 1
@@ -390,6 +433,9 @@ class BookManagerApp:
             messagebox.showinfo("Navigation", "This is the last book.")
 
     def prev_book(self):
+        if not self.books_data_list:
+            messagebox.showinfo("Navigation", "No books loaded. Fetch books by ISBN first.")
+            return
         if self.current_book_index > 0:
             # Could save current form state here
             self.current_book_index -= 1
@@ -398,8 +444,8 @@ class BookManagerApp:
             messagebox.showinfo("Navigation", "This is the first book.")
 
     def export_book_data(self):
-        if not self.books_data_list:
-            messagebox.showerror("Error", "No book data to export.")
+        if not self.books_data_list or self.current_book_index == -1:
+            messagebox.showerror("Error", "No book data loaded or selected to export.")
             return
 
         current_ol_book = self.books_data_list[self.current_book_index]
@@ -472,6 +518,80 @@ class BookManagerApp:
         print(json.dumps(final_json_output, indent=2))
         messagebox.showinfo("Exported", "Book data for Strapi printed to console.")
 
+    def fetch_books_by_isbn(self):
+        isbn_string = self.isbn_text.get("1.0", tk.END).strip()
+        if not isbn_string:
+            messagebox.showwarning("Input Error", "Please enter one or more ISBNs.")
+            return
+
+        # Split by comma or newline, then strip whitespace and filter out empty strings
+        isbn_list = [isbn.strip() for isbn_pattern in isbn_string.replace('\n', ',').split(',') for isbn in [isbn_pattern.strip()] if isbn]
+
+        if not isbn_list:
+            messagebox.showwarning("Input Error", "No valid ISBNs entered after parsing.")
+            return
+
+        print(f"User entered ISBNs for fetching: {isbn_list}") # Debug
+        
+        # Show a loading message or disable parts of UI
+        self.nav_label.config(text="Fetching books by ISBN...")
+        self.master.update_idletasks() # Force UI update
+
+        fetched_books = fetch_books_by_isbns(isbn_list)
+
+        if fetched_books:
+            self.books_data_list = fetched_books
+            self.current_book_index = 0 # Start at the first fetched book
+            self.load_book_data(self.current_book_index)
+            messagebox.showinfo("Success", f"Successfully fetched {len(fetched_books)} book(s).")
+        else:
+            self.books_data_list = []
+            self.current_book_index = -1
+            self.clear_form_and_display()
+            self.nav_label.config(text="No books found for the provided ISBN(s).")
+            messagebox.showwarning("Not Found", "No books found for the provided ISBN(s).")
+        
+        # Update button states based on whether books were loaded
+        if self.books_data_list:
+            self.prev_button.config(state=tk.DISABLED if len(self.books_data_list) <= 1 else tk.NORMAL)
+            self.next_button.config(state=tk.DISABLED if len(self.books_data_list) <= 1 else tk.NORMAL)
+            if len(self.books_data_list) == 1:
+                 self.prev_button.config(state=tk.DISABLED)
+                 self.next_button.config(state=tk.DISABLED)
+        else:
+            self.prev_button.config(state=tk.DISABLED)
+            self.next_button.config(state=tk.DISABLED)
+
+    def clear_form_and_display(self):
+        """Clears all display fields and form inputs."""
+        self.ol_title_label.config(text="N/A")
+        self.ol_authors_label.config(text="N/A")
+        self.ol_subjects_var.set("N/A")
+        self.cover_label.config(image=None, text="No cover")
+        self.cover_label.image = None # Clear reference
+
+        self.title_var.set("")
+        self.author_var.set("")
+        if self.description_text_widget:
+            self.description_text_widget.delete("1.0", tk.END)
+        self.condition_var.set("Good")
+        self.book_type_var.set("For Sale")
+        self.status_var.set("available")
+        self.users_permissions_user_var.set("")
+        self.price_var.set("")
+        self.subject_for_strapi_var.set("")
+        self.course_var.set("")
+        self.exchange_var.set("")
+        self.featured_var.set(False)
+        self.book_of_week_var.set(False)
+        self.book_of_year_var.set(False)
+        self.display_title_var.set("")
+        self.display_strapi_var.set(False)
+        self.rating_var.set(0)
+        self.categories_strapi_ids_var.set("")
+        self.cover_strapi_id_var.set("")
+        self.nav_label.config(text="No books loaded.")
+
 
 # Original function, can be used separately if needed for bulk downloads
 def download_covers_to_folder(books_data_list, folder_name="downloaded_book_covers"):
@@ -481,7 +601,7 @@ def download_covers_to_folder(books_data_list, folder_name="downloaded_book_cove
 
     os.makedirs(folder_name, exist_ok=True)
     total = len(books_data_list)
-    print(f"\\nStarting download of {total} covers to '{folder_name}' folder...")
+    print(f"\nStarting download of {total} covers to '{folder_name}' folder...")
     
     for i, book in enumerate(books_data_list, 1):
         cover_url = book.get("cover_url_large")
@@ -506,67 +626,41 @@ def download_covers_to_folder(books_data_list, folder_name="downloaded_book_cove
         except requests.RequestException as e:
             print(f"[{percent}%] Error for {book.get('title', 'Unknown Title')}: {e}")
         time.sleep(0.05)
-    print("\\n✅ Cover download to folder finished.")
+    print("\n✅ Cover download to folder finished.")
 
 
 def main():
-    try:
-        # For testing, fetch a small number of books
-        num_books_to_fetch = input("How many random books do you want to fetch for the GUI? (e.g., 5-10): ")
-        count = int(num_books_to_fetch)
-        if count <= 0:
-            print("Please enter a positive number.")
-            return
-
-        fetched_books = fetch_random_books(count)
-        
-        if not fetched_books:
-            print("No book data was fetched. Exiting.")
-            return
-        
-        # --- Start GUI ---
-        root = tk.Tk()
-        app = BookManagerApp(root, fetched_books)
-        root.mainloop()
-        
-        print("\\n✅ Script finished.")
-
-    except ValueError:
-        print("Invalid input. Please enter a number.")
-    except Exception as e:
-        print(f"An unexpected error occurred in main: {e}")
-        import traceback
-        traceback.print_exc()
+    # No longer pre-fetches random books
+    root = tk.Tk()
+    app = BookManagerApp(root) # Initialize without pre-fetched data
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
 
-def fetch_book_by_isbn(isbn):
+def fetch_book_by_isbn(isbn): # This function is no longer used by the app but kept for potential direct use.
     url = f"https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data"
     try:
         res = requests.get(url, timeout=10)
-        if res.status_code != 200:
-            return None
-        data = res.json()
-        key = f"ISBN:{isbn}"
-        if key not in data:
-            return None
-        book = data[key]
-        title = book.get("title", "Unknown Title")
-        authors = [a["name"] for a in book.get("authors", [])] if "authors" in book else ["Unknown Author"]
-        cover_url = book.get("cover", {}).get("medium") or book.get("cover", {}).get("large")
-        subjects = [s["name"] for s in book.get("subjects", [])] if "subjects" in book else []
-        description = book.get("notes") or book.get("subtitle") or "Description not available."
-        return {
-            "title": title,
-            "authors": authors,
-            "cover_url_medium": cover_url,
-            "cover_url_large": cover_url,
-            "subjects_from_ol": subjects,
-            "isbn": [isbn],
-            "openlibrary_key": book.get("key", None),
-            "description": description,
-            "description_loaded": True
-        }
+        if res.status_code == 200:
+            data = res.json()
+            key = next(iter(data)) if data else None
+            if key:
+                return data[key]
     except Exception:
         return None
+
+    # def fetch_books_by_isbn(self): # This method has been moved into the BookManagerApp class
+    #     isbn_raw = self.isbn_text.get("1.0", tk.END)
+    #     isbn_list = [isbn.strip() for isbn in isbn_raw.replace(',', '\\n').split('\\n') if isbn.strip()]
+    #     if not isbn_list:
+    #         messagebox.showwarning("Input Error", "Please enter at least one ISBN.")
+    #         return
+    #     books = fetch_books_by_isbns(isbn_list)
+    #     if not books:
+    #         messagebox.showinfo("No Books", "No valid books found for the provided ISBNs.")
+    #         return
+    #     self.books_data_list = books
+    #     self.current_book_index = 0
+    #     self.load_book_data(0)
+    #     messagebox.showinfo("Done", f"Fetched {len(books)} books by ISBN.")
