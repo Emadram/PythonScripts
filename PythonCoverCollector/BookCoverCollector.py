@@ -285,27 +285,43 @@ class BookManagerApp:
             return
 
         self.current_book_index = index
-        book = self.books_data_list[index]
+        book = self.books_data_list[index] # This is a reference to the dict in the list
 
         # Update OL Info
         self.ol_title_label.config(text=book.get("title", "N/A"))
         self.ol_authors_label.config(text=", ".join(book.get("authors", ["N/A"])))
         
-        ol_subjects_str = ", ".join(book.get("subjects_from_ol", [])[:5]) # Show first 5 subjects
+        ol_subjects_str = ", ".join(book.get("subjects_from_ol", [])[:5]) 
         if len(book.get("subjects_from_ol", [])) > 5:
             ol_subjects_str += "..."
         self.ol_subjects_var.set(ol_subjects_str if ol_subjects_str else "N/A")
 
-        self.display_cover(book.get("cover_url_medium")) # Use medium cover for display
+        self.display_cover(book.get("cover_url_medium")) 
 
         # Update form fields (pre-fill from book data)
         self.title_var.set(book.get("title", ""))
         self.author_var.set(", ".join(book.get("authors", [])))
         
+        # Handle description loading on demand
         self.description_text_widget.delete("1.0", tk.END)
-        self.description_text_widget.insert("1.0", book.get("description", ""))
+        if book.get("description_loaded"):
+            self.description_text_widget.insert("1.0", book.get("description", "Not available."))
+        else:
+            self.description_text_widget.insert("1.0", "Loading description...")
+            # Fetch description (this will block GUI briefly the first time)
+            # In a more advanced app, this would be in a separate thread.
+            details, error_msg = fetch_book_details(book.get("openlibrary_key"))
+            if details:
+                book["description"] = details.get("description", "Error fetching description.")
+            else:
+                book["description"] = f"Error fetching description: {error_msg}"
+            book["description_loaded"] = True # Mark as loaded
+            
+            # Update the widget again with the fetched description
+            self.description_text_widget.delete("1.0", tk.END)
+            self.description_text_widget.insert("1.0", book.get("description"))
 
-        # Set defaults for user-input fields (or load from a saved state if implemented)
+        # Set defaults for user-input fields 
         self.condition_var.set("Good")
         self.book_type_var.set("For Sale")
         self.status_var.set("available")
