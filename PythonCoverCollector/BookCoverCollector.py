@@ -540,3 +540,33 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def fetch_book_by_isbn(isbn):
+    url = f"https://openlibrary.org/api/books?bibkeys=ISBN:{isbn}&format=json&jscmd=data"
+    try:
+        res = requests.get(url, timeout=10)
+        if res.status_code != 200:
+            return None
+        data = res.json()
+        key = f"ISBN:{isbn}"
+        if key not in data:
+            return None
+        book = data[key]
+        title = book.get("title", "Unknown Title")
+        authors = [a["name"] for a in book.get("authors", [])] if "authors" in book else ["Unknown Author"]
+        cover_url = book.get("cover", {}).get("medium") or book.get("cover", {}).get("large")
+        subjects = [s["name"] for s in book.get("subjects", [])] if "subjects" in book else []
+        description = book.get("notes") or book.get("subtitle") or "Description not available."
+        return {
+            "title": title,
+            "authors": authors,
+            "cover_url_medium": cover_url,
+            "cover_url_large": cover_url,
+            "subjects_from_ol": subjects,
+            "isbn": [isbn],
+            "openlibrary_key": book.get("key", None),
+            "description": description,
+            "description_loaded": True
+        }
+    except Exception:
+        return None
